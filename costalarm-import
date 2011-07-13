@@ -1,0 +1,218 @@
+#!/usr/bin/env bash
+
+################################################################################
+#                     CostAlarm for Amazon Web Services                        #
+#               Copyright (C) 2011 Shore Labs for costalarm.com                #
+#                                                                              #
+# Permission is hereby granted, free of charge, to any person obtaining a copy #
+# of this software and associated documentation files (the "Software"), to deal#
+# in the Software without restriction, including without limitation the rights #
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell    #
+# copies of the Software, and to permit persons to whom the Software is        #
+# furnished to do so, subject to the following conditions:                     #
+#                                                                              #
+# The above copyright notice and this permission notice shall be included in   #
+# all copies or substantial portions of the Software.                          #
+#                                                                              #
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR   #
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,     #
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE  #
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER       #
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,#
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN    #
+# THE SOFTWARE.                                                                #
+#                                                                              #
+# Amazon Web Services and AWS are trademarks of Amazon.com, Inc. or its        #
+# affiliates in the United States and/or other countries.                      #
+#                                                                              #
+################################################################################
+
+#
+# This script requires following commands / packages to be available:
+# bash, curl, sed, mktemp
+#
+
+# AWS Activity Report URL
+REPORT_URL="https://aws-portal.amazon.com/gp/aws/developer/account/index.html?ie=UTF8&action=activity-summary"
+
+# costalarm.com API statement import URL
+IMPORT_URL="http://costalarm.com/api/v1/statements/import.xml"
+
+# A temporary file to store session cookie information
+COOKIE_FILE=`mktemp`
+
+# Helper function to extract input values from html in $RESPONSE into given variable
+# Usage: mkparam VARIABLE_NAME INPUT_NAME
+function mkparam { eval $1="$2="`echo $RESPONSE | sed -n "s/.*<input.*name=\"$2\" value=\"\([^\"]*\)\".*/\1/gp"`; }
+
+#
+# Source configuration files
+#
+
+# Global configuration file
+if [ -f /etc/costalarm/config ]
+then
+    source /etc/costalarm/config
+fi
+
+# User configuration file
+if [ -f ~/.costalarmrc ]
+then
+    source ~/.costalarmrc
+fi
+
+
+#
+# Read command line options
+#
+
+while getopts ":u:p:t:v" flag
+do
+  case $flag in
+    u)    AWS_USERNAME="$OPTARG";;
+    p)    AWS_PASSWORD="$OPTARG";;
+    t)    API_TOKEN="$OPTARG";;
+    v)    VERBOSE=1;;
+    *)    printf "Usage $flag: %s: -u username -p password\n" $0
+          exit 2;;
+  esac
+done
+
+#
+# Make sure we have both AWS_USERNAME and AWS_PASSWORD set to continue
+#
+if [[ -z "$AWS_USERNAME" || -z "$AWS_PASSWORD" || -z "$API_TOKEN" ]] ; then
+  echo "$AWS_USERNAME $AWS_PASSWORD $API_TOKEN"
+  echo -e "\033[1mCostAlarm AWS Cost Reporting Agent\033[0m"
+  echo ""
+  echo "Please make sure you have AWS username, AWS password and CostAlarm API token set."
+  echo "Synposis: $0 -u AWS_USERNAME -p AWS_PASSWORD -t API_TOKEN"
+  echo ""
+  echo "You can also use configuration files to store that information for you:"
+  echo "/etc/costalarm/config for global configuration or"
+  echo "~/.costalarmrc for user specific runtime configuration."
+  echo ""
+  echo "Configuration file syntax:"
+  echo "AWS_USERNAME=\"...your AWS email address here...\""
+  echo "AWS_PASSWORD=\"...your AWS password here...\""
+  echo "API_TOKEN=\"..your costalarm API token here...\""
+  echo ""
+  exit 2
+fi;
+
+# Print the header
+echo ""
+echo -e "\033[1mcostalarm.com AWS Cost Reporting Agent\033[0m"
+echo ""
+
+
+# First, try getting the statement page. Since cookies are empty, AWS will redirect to the proper login page.
+# Store HTML of the login page in $RESPONSE
+echo -n "Fetching the AWS login page..."
+RESPONSE=`curl -q --progress-bar --silent --user-agent "costalarm/1.0 (costalarm.com)" --cookie-jar $COOKIE_FILE --location $REPORT_URL`
+
+# Check curl exit status for errors
+if [ $? -ne 0 ]; then
+   echo -e " \033[31m[FAILED]\033[0m"
+   echo "Cannot fetch the AWS login page. Please check your internet connection."
+   echo "Also, please make sure that you are using the latest version of the Cost Reporting Agent."
+   echo ""
+   exit 255
+fi
+echo " [OK]"
+
+# Build login form action URL to which login details should be sent to
+URL="https://www.amazon.com/ap/signin"`echo $RESPONSE | sed -n "s/.*action=\"https:\/\/www.amazon.com\/ap\/signin\([^\"]*\)\".*/\1/gp";`
+
+# Build POST parameters according to the data in the login form
+# This list may need to be updated if Amazon introduces any changes to their login page.
+mkparam "P1" "appActionToken"
+mkparam "P2" "appAction"
+mkparam "P3" "accountStatusPolicy"
+mkparam "P4" "openid.pape.max_auth_age"
+mkparam "P5" "openid.ns"
+mkparam "P6" "openid.ns.pape"
+mkparam "P7" "openid.pape.preferred_auth_policies"
+mkparam "P8" "authCookies"
+mkparam "P9" "pageId"
+mkparam "P10" "openid.identity"
+mkparam "P11" "openid.claimed_id"
+mkparam "P12" "openid.mode"
+mkparam "P13" "openid.assoc_handle"
+mkparam "P14" "openid.return_to"
+
+
+# Try logging in by POSTing all necessary information.
+# Successful login will redirect to the account activity page
+echo -n "Logging in and reading the latest statement..."
+RESPONSE=`curl -q --progress-bar --silent \
+      --user-agent "costalarm/1.0 (costalarm.com)" --location --cookie-jar $COOKIE_FILE --cookie $COOKIE_FILE \
+      --data-urlencode "create=0" --data-urlencode "email=$AWS_USERNAME" --data-urlencode "password=$AWS_PASSWORD" --data-urlencode "submit=Continue" \
+      --data-urlencode $P1 --data-urlencode $P2 --data-urlencode $P3 --data-urlencode $P4 --data-urlencode $P5 --data-urlencode $P6 --data-urlencode $P7 --data-urlencode $P8 --data-urlencode $P9 --data-urlencode $P10 --data-urlencode $P11 --data-urlencode $P12 --data-urlencode $P13 --data-urlencode $P14 \
+      $URL`
+
+# Check curl exit status for errors
+if [ $? -ne 0 ]; then
+   echo -e " \033[31m[FAILED]\033[0m"
+   echo "Cannot login to AWS. Please check that you are using the latest version of the Cost Reporting Agent."
+   echo ""
+   exit 255
+fi
+
+
+# Now we are either on the account activity page (login successful)
+# or still on login page (login unsuccessful)
+
+# Try extracting the AWS Account number, if it's empty, we are still on the login page
+ACCOUNT_ID=`echo $RESPONSE | sed -n "s/.*Account Number \([^<]*\).*/\1/gp"`;
+
+if [ -z $ACCOUNT_ID ] ; then
+  echo -e " \033[31m[FAILED]\033[0m"
+  echo "Invalid login credentials. Please check your email address and password combination."
+  echo ""
+  exit 255
+fi;
+echo " [OK]"
+
+
+# Export data to the costalarm.com site
+echo -n "Exporting data to CostAlarm..."
+RESPONSE=`curl  -q --progress-bar --silent \
+      --user-agent "costalarm/1.0 (costalarm.com)" --location \
+      --data-urlencode "api_token=$API_TOKEN" \
+      --data-urlencode "aws_account_number=$ACCOUNT_ID" --data-urlencode "activity_table=$RESPONSE" \
+      $IMPORT_URL`
+
+# Check curl exit status for errors
+if [ $? -ne 0 ]; then
+   echo -e " \033[31m[FAILED]\033[0m"
+   echo "Cannot connect to costalarm.com. Please check your internet connection."
+   echo ""
+   exit 255
+fi
+
+# Parse the costalarm message
+CODE=`echo $RESPONSE | sed -n "s/.*<status[^>]*>\([^<]*\)<\/status>.*/\1/gp"`
+MSG=`echo $RESPONSE | sed -n "s/.*<message>\([^<]*\)<\/message>.*/\1/gp"`
+
+# Check for message - if it's empty there may be some problems
+if [ -z "$CODE" ]; then
+   echo -e " \033[31m[FAILED]\033[0m"
+   echo "Invalid response from costalarm.com. Please try again later."
+   echo ""
+   exit 255
+fi
+
+if [ $CODE -ne "200" ]; then
+   echo -e " \033[31m[FAILED]\033[0m"
+   echo "$MSG"
+   echo ""
+   exit 255
+fi
+
+
+echo " [OK]"
+echo ""
+echo "$MSG"
+echo "The latest AWS statement has been succesfully imported."
+echo ""
