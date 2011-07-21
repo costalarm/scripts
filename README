@@ -1,0 +1,22 @@
+=============================
+     CostAlarm Scripts
+=============================
+
+These scripts are meant to be used with your account on costalarm.com
+
+Once you sign up, please start with the costalarm-setup script.
+It will guide you through the configuration process.
+
+If you want to configure everything manually, all you have to do is to create
+either /etc/costalarm/config or ~/.costalarmrc file with the following content:
+
+AWS_USERNAME="...Your Amazon Web Services email here..."
+AWS_PASSWORD="...Your Amazon Web Services password here..."
+API_TOKEN="...Your CostAlarm.com API token here..."
+
+You may also need to schedule the AWS statement import.
+Simply invoke the costalarm-import script on regular basis.
+
+Example for systems with cron installed:
+0 * * * * /usr/local/bin/costalarm-import
+

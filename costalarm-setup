@@ -92,11 +92,11 @@ function configureApiToken {
 function configureStatementImport {  
   if [ -z $MAIN_ANSWER ]; then
     echo ""
-    echo -e "\033[1mStatement Import Agent\033[0m"
-    echo "The statement import script is responsible for reading the latest AWS statement from aws.amazon.com and sending it to costalarm.com for processing."
-    echo "The Amazon login credintials which are being used through this process are stored on your computer only and are not transferred to the costalarm.com website"
+    echo -e "\033[1mCost Reporting Agent\033[0m"
+    echo "Cost Reporting Agent (costalarm-import script) is responsible for reading the latest AWS statement from aws.amazon.com and sending it to costalarm.com for processing."
+    echo "Amazon login credintials which are being used through this process are stored on your computer only and are not transferred to the costalarm.com website"
     echo ""
-    echo -n "Would you like to configure the statement import agent? [Yn] "
+    echo -n "Would you like to configure the Cost Reporting Agent? [Yn] "
     read -e MAIN_ANSWER
   fi
   
@@ -154,10 +154,10 @@ function tryAddingCronJob {
     let "CRON_MIN %= 60"
 
     echo ""
-    echo -e "\033[1mStatement import schedule\033[0m"
-    echo "This setup script can install a cron job that will schedule automatic statement import at least few times a day."
+    echo -e "\033[1mCost Reporting Agent statement import schedule\033[0m"
+    echo "This setup script can install a cron job that will schedule automatic, hourly statement import."
     echo "The cron job will be added with the following parameters:"
-    echo "$CRON_MIN * * * * /usr/bin/costalarm-import"
+    echo "$CRON_MIN * * * * /usr/local/bin/costalarm-import"
     echo ""
     echo -n "Would you like to add the cron job? [Yn]"
     read -e CRON_ANSWER
